@@ -1,5 +1,8 @@
-# define BOARD_SIZE 10
-# define MAX_SHIPS 5
+#ifndef GAME_H
+#define GAME_H
+
+#define BOARD_SIZE 10
+#define MAX_SHIPS 5
 
 /* Enum representing state of each cell on board.
 */
@@ -10,6 +13,20 @@ typedef enum {
     CELL_MISS
 } CellState;
 
+/* Enum representing the result of a shot.
+*/
+typedef enum {
+    SHOT_INVALID,
+    SHOT_MISS,
+    SHOT_HIT,
+    SHOT_SUNK
+} ShotResult;
+
+typedef enum {
+    HORIZONTAL,
+    VERTICAL
+} Orientation;
+
 /* This structure represents a ship in the game of Battleship. 
 It contatins information about how many times its been hit, where it is,
 if it has been sunk, its orientation. The position is the back of the ship,
@@ -19,7 +36,7 @@ typedef struct {
     int x;
     int y;
     int length;
-    char orientation; // 'H' for horizontal, 'V' for vertical
+    Orientation orientation; // HORIZONTAL or VERTICAL
     int hits; // Number of hits taken
     int sunk; // 0 for not sunk, 1 for sunk
 } Ship;
@@ -28,7 +45,7 @@ typedef struct {
 about the ships on the board and the state of each cell.
 */
 typedef struct {
-    char board[BOARD_SIZE][BOARD_SIZE];
+    CellState cells[BOARD_SIZE][BOARD_SIZE];
     Ship ships[MAX_SHIPS];
     int ships_placed; // May take away but for now is used to track if player is ready to play
 } Board;
@@ -42,6 +59,16 @@ typedef struct {
     int game_over; // 0 for not over, 1 for over
 } Game;
 
+void init_board(Board *board);
+void init_game(Game *game);
+int can_place_ship(Board *board, Ship ship);
+int place_ship(Board *board, Ship ship);
+int all_ships_sunk(Board *board);
+ShotResult take_shot(Board *board, int x, int y);
+int in_bounds(int x, int y);
+Ship *get_ship_at(Board *board, int x, int y);
+
+#endif /* GAME_H */
 
 
 
