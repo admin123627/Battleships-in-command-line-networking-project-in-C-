@@ -250,17 +250,28 @@ int client_place_ships(Client *client) {
                 return -1;
             }
 
-            /* Get orientation */
-            printf("Orientation (H=horizontal, V=vertical): ");
-            char orient_char;
-            scanf(" %c", &orient_char);
-            getchar();  /* Consume newline */
+            /* Get and validate orientation - only H/h or V/v accepted */
+            Orientation orientation;
+            while (1) {
+                printf("Orientation (H=horizontal, V=vertical): ");
+                char orient_char;
+                scanf(" %c", &orient_char);
+                getchar();  /* Consume newline */
 
-            Orientation orientation = (orient_char == 'H' || orient_char == 'h')
-                                      ? HORIZONTAL
-                                      : VERTICAL;
+                if (orient_char == 'H' || orient_char == 'h') {
+                    orientation = HORIZONTAL;
+                    break;
+                } else if (orient_char == 'V' || orient_char == 'v') {
+                    orientation = VERTICAL;
+                    break;
+                } else {
+                    printf("Invalid orientation. Please enter H or V.\n");
+                }
+            }
 
-            /* Create and validate ship placement */
+            /* Create and validate ship placement.
+             * We validate orientation before creating ShipPlacement to ensure
+             * the placement struct only contains valid data. */
             ShipPlacement placement;
             placement.x = x;
             placement.y = y;
