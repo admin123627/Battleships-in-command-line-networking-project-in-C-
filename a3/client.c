@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include "client.h"
@@ -441,4 +442,95 @@ void client_disconnect(Client *client) {
     client->state = CLIENT_INIT;
     client->room_id = -1;
     client->player_id = -1;
+}
+
+/*
+ * main - Entry point for the Battleship client.
+ *
+ * Usage: ./client <hostname> <port>
+ *
+ * Flow:
+ * 1. Parse command-line arguments (hostname and port)
+ * 2. Initialize Client struct
+ * 3. Connect to the server
+ * 4. Ask user to create a new room or join an existing room
+ * 5. Call appropriate room setup function
+ * 6. Print status message (game setup to follow)
+ *
+ * Returns:
+ *   0 on normal exit
+ *   1 on error (invalid args, connection failure, etc.)
+ */
+int main(int argc, char *argv[]) {
+    /* Validate command-line arguments */
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <hostname> <port>\n", argv[0]);
+        fprintf(stderr, "Example: %s localhost 9999\n", argv[0]);
+        return 1;
+    }
+
+    const char *hostname = argv[1];
+    int port = atoi(argv[2]);
+
+    if (port <= 0 || port > 65535) {
+        fprintf(stderr, "Error: Port must be between 1 and 65535.\n");
+        return 1;
+    }
+
+    /* Initialize the client */
+    Client client;
+    client_init(&client);
+
+    /* Connect to the server */
+    printf("Connecting to %s:%d...\n", hostname, port);
+    if (client_connect_to_server(&client, port, hostname) < 0) {
+        fprintf(stderr, "Failed to connect to server.\n");
+        client_disconnect(&client);
+        return 1;
+    }
+
+    /* Ask user whether to create or join a room */
+    printf("\nWould you like to:\n");
+    printf("  1) Create a new room\n");
+    printf("  2) Join an existing room\n");
+    printf("Enter your choice (1 or 2): ");
+
+    int choice;
+    scanf("%d", &choice);
+    getchar();  /* Consume newline */
+
+    if (choice == 1) {
+        /* Create a new room */
+        printf("\n--- Creating Room ---\n");
+        if (client_create_room(&client) < 0) {
+            fprintf(stderr, "Failed to create room.\n");
+            client_disconnect(&client);
+            return 1;
+        }
+    } else if (choice == 2) {
+        /* Join an existing room */
+        printf("\n--- Joining Room ---\n");
+        if (client_join_room(&client) < 0) {
+            fprintf(stderr, "Failed to join room.\n");
+            client_disconnect(&client);
+            return 1;
+        }
+    } else {
+        fprintf(stderr, "Invalid choice. Please enter 1 or 2.\n");
+        client_disconnect(&client);
+        return 1;
+    }
+
+    /* Lobby setup complete; waiting for opponent and game start */
+    printf("\n========================================\n");
+    printf("Ready for next phase:\n");
+    printf("- Waiting for opponent to join/connect\n");
+    printf("- Next: Board setup and game start\n");
+    printf("========================================\n");
+
+    /* Cleanup and exit */
+    client_disconnect(&client);
+    printf("\nClient disconnected.\n");
+
+    return 0;
 }
