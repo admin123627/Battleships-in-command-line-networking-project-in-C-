@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include "game.h"
 
 int in_bounds(int x, int y) {
