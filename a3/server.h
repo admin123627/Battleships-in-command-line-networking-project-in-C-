@@ -5,32 +5,33 @@
 #include "game.h"
 #include "protocol.h"
 
+#define PORT 9999
 #define MAX_CLIENTS 20
 #define MAX_ROOMS 10
 #define ROOM_SIZE 2
 
-/* Represents one client connected to the server. */
+/* Represents one connected client on the server. */
 typedef struct {
-    int fd;
-    int active;
+    int socket_fd; // socket file descriptor for this client
+    int is_connected; // 1 if this slot is active, 0 if empty
 
-    int room_id;
-    int player_id;
+    int assigned_room_id; // room ID assigned by server (-1 if not in room)
+    int assigned_player_id; // player ID within room (0 or 1, -1 if not assigned)
 
-    char name[MAX_NAME_LEN];
+    char name[MAX_NAME_LEN]; // player's chosen name
 } Client;
 
 /* Represents one game room on the server. */
 typedef struct {
-    int room_id;                    // unique room number
-    int active;                     // 1 if room exists, 0 otherwise
-    int num_players;                // current number of players in room
-    int game_started;               // 1 once gameplay begins
+    int room_id; // unique room number
+    int is_active; // 1 if room exists, 0 if empty
+    int current_player_count; // current number of players in room (0-2)
+    int is_game_started; // 1 once gameplay begins
 
-    int boards_submitted[ROOM_SIZE]; // whether each player submitted a valid board
+    int player_boards_submitted[ROOM_SIZE]; // whether each player submitted a valid board
 
-    Client *players[ROOM_SIZE];     // pointers to the two clients in this room
-    Game game;                      // authoritative game state
+    Client *connected_players[ROOM_SIZE]; // pointers to the two clients in this room
+    Game game; // authoritative game state
 } Room;
 
 /* Core server loop */
