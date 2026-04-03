@@ -455,16 +455,17 @@ int client_submit_board(Client *client) {
 /*
  * client_play_game - Main game loop for the client.
  *
- * TODO: Implement full game loop:
- * - MSG_YOUR_TURN: Prompt for shot, send MSG_SHOOT
- * - MSG_SHOT_RESULT: Receive result, update enemy_view
- * - MSG_INCOMING_SHOT: Receive shot, update own_board, send response
- * - MSG_WAIT_TURN: Wait for opponent's turn
- * - MSG_GAME_OVER: Receive result, determine winner
+ * Receives messages from the server and processes them:
+ * - MSG_YOUR_TURN: Prompt player for shot coordinates and send MSG_SHOOT
+ * - MSG_SHOT_RESULT: Update enemy_view and display the result (hit/miss/sunk)
+ * - MSG_INCOMING_SHOT: Update own_board and display what opponent hit
+ * - MSG_WAIT_TURN: Display waiting message and continue
+ * - MSG_GAME_OVER: Determine and display the winner, exit loop
+ * - MSG_ERROR: Display error message and return -1
  *
  * Returns:
  *   0 on normal game end
- *   -1 on error
+ *   -1 on error (connection lost, unexpected message, etc.)
  */
 int client_play_game(Client *client) {
     if (client->state != CLIENT_IN_GAME) {
@@ -472,10 +473,141 @@ int client_play_game(Client *client) {
         return -1;
     }
 
-    printf("\n=== Game Loop ===\n");
-    printf("TODO: Full game loop implementation not yet complete.\n");
-    printf("Ready to play when server implementation is available.\n");
+    printf("\n=== Game Started! ===\n");
+    printf("Let's play Battleship! Good luck!\n\n");
 
+    Message msg;
+    int game_running = 1;
+
+    /* Main game loop: process messages from server until game ends */
+    while (game_running) {
+        /* Receive next message from server */
+        if (receive_message(client->fd, &msg) < 0) {
+            fprintf(stderr, "Error: Connection lost during gameplay.\n");
+            client->state = CLIENT_ERROR;
+            return -1;
+        }
+
+        /* Handle each message type from the server */
+        switch (msg.type) {
+            /* ===== OUR TURN: We shoot at the opponent ===== */
+            case MSG_YOUR_TURN:
+                printf("\n--- Your Turn! ---\n");
+                printf("Current view of opponent's board:\n");
+                print_board(&client->enemy_view, 0);
+
+                /* Prompt player for shot coordinates using helper function */
+                int x, y;
+                if (get_player_input(&x, &y) < 0) {
+                    fprintf(stderr, "Error: Failed to read coordinates.\n");
+                    return -1;
+                }
+
+                /* Create and send MSG_SHOOT message with coordinates */
+                Message shoot_msg;
+                memset(&shoot_msg, 0, sizeof(Message));
+                shoot_msg.type = MSG_SHOOT;
+                shoot_msg.x = x;
+                shoot_msg.y = y;
+                shoot_msg.player_id = client->player_id;
+                shoot_msg.room_id = client->room_id;
+
+                if (send_message(client->fd, &shoot_msg) < 0) {
+                    fprintf(stderr, "Error: Failed to send shot to server.\n");
+                    client->state = CLIENT_ERROR;
+                    return -1;
+                }
+
+                printf("Shot sent to (%d, %d). Waiting for result...\n", x, y);
+                break;
+
+            /* ===== RESULT OF OUR SHOT ===== */
+            case MSG_SHOT_RESULT:
+                printf("\n--- Shot Result ---\n");
+
+                /* Update enemy_view board to reflect the shot result */
+                switch (msg.shot_result) {
+                    case SHOT_MISS:
+                        client->enemy_view.cells[msg.y][msg.x] = CELL_MISS;
+                        printf("Your shot at (%d, %d) was a MISS!\n", msg.x, msg.y);
+                        break;
+
+                    case SHOT_HIT:
+                        client->enemy_view.cells[msg.y][msg.x] = CELL_HIT;
+                        printf("Your shot at (%d, %d) was a HIT!\n", msg.x, msg.y);
+                        break;
+
+                    case SHOT_SUNK:
+                        client->enemy_view.cells[msg.y][msg.x] = CELL_HIT;
+                        printf("Your shot at (%d, %d) SUNK an opponent's ship!\n", msg.x, msg.y);
+                        break;
+
+                    default:
+                        printf("Unexpected shot result (%d).\n", msg.shot_result);
+                        break;
+                }
+                break;
+
+            /* ===== OPPONENT SHOT AT US ===== */
+            case MSG_INCOMING_SHOT:
+                printf("\n--- Opponent's Shot ---\n");
+
+                /* Update own_board to reflect the opponent's shot result */
+                switch (msg.shot_result) {
+                    case SHOT_MISS:
+                        client->own_board.cells[msg.y][msg.x] = CELL_MISS;
+                        printf("Opponent shot at (%d, %d) and MISSED!\n", msg.x, msg.y);
+                        break;
+
+                    case SHOT_HIT:
+                        client->own_board.cells[msg.y][msg.x] = CELL_HIT;
+                        printf("Opponent shot at (%d, %d) and HIT your ship!\n", msg.x, msg.y);
+                        break;
+
+                    case SHOT_SUNK:
+                        client->own_board.cells[msg.y][msg.x] = CELL_HIT;
+                        printf("Opponent shot at (%d, %d) and SUNK one of your ships!\n", msg.x, msg.y);
+                        break;
+
+                    default:
+                        printf("Unexpected shot result (%d).\n", msg.shot_result);
+                        break;
+                }
+                break;
+
+            /* ===== WAIT FOR OPPONENT'S TURN ===== */
+            case MSG_WAIT_TURN:
+                printf("Waiting for opponent to take their turn...\n");
+                break;
+
+            /* ===== GAME OVER ===== */
+            case MSG_GAME_OVER:
+                printf("\n");
+                if (msg.winner_id == client->player_id) {
+                    printf("*** YOU WON! ***\n");
+                } else {
+                    printf("*** YOU LOST! ***\n");
+                }
+                printf("Game has ended.\n");
+                game_running = 0;  /* Exit the game loop */
+                break;
+
+            /* ===== ERROR FROM SERVER ===== */
+            case MSG_ERROR:
+                fprintf(stderr, "Server error: %s\n", msg.error_msg);
+                client->state = CLIENT_ERROR;
+                return -1;
+
+            /* ===== UNEXPECTED MESSAGE TYPE ===== */
+            default:
+                printf("Received unexpected message type: %d\n", msg.type);
+                break;
+        }
+    }
+
+    /* Game loop ended normally */
+    client->state = CLIENT_GAME_OVER;
+    printf("\nThanks for playing Battleship!\n");
     return 0;
 }
 
