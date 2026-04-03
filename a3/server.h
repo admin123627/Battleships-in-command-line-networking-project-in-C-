@@ -35,7 +35,7 @@ typedef struct {
 } Room;
 
 /* Core server loop */
-void run_server(int listen_fd);
+void run_server(int listen_fd, Client clients[], Room rooms[]);
 
 /* Connection handling */
 void handle_new_connection(int listen_fd, Client clients[]);
@@ -61,6 +61,6 @@ void handle_shot(Room *room, Client *client, Message *msg);
 Client *get_opponent(Room *room, Client *client);
 
 /* Utility */
-void send_error(int fd, const char *msg);
+int send_error(int fd, const char *msg);
 
 #endif
