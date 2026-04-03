@@ -21,8 +21,14 @@ typedef enum {
     MSG_ROOM_CREATED,    // Server -> Client
     MSG_JOIN_ROOM,       // Client -> Server
     MSG_JOIN_OK,         // Server -> Client
+<<<<<<< HEAD
     MSG_OPPONENT_JOINED, // Server -> Client
     MSG_GAME_START,      // Server -> Client
+=======
+    MSG_WAITING,         // Server -> Client (waiting for opponent to join)
+    MSG_OPPONENT_JOINED, // Server -> Client (both players in room, board setup can begin)
+    MSG_GAME_START,      // Server -> Client (both boards submitted, gameplay begins)
+>>>>>>> 908bee7 (Separate opponent joined from game start in client flow)
 
     /* Board setup */
     MSG_SUBMIT_BOARD,    // Client -> Server

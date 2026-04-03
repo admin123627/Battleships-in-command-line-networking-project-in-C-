@@ -308,6 +308,67 @@ int client_place_ships(Client *client) {
 }
 
 /*
+ * client_wait_for_opponent - Wait for the opponent to join the room.
+ *
+ * After creating or joining a room, this function waits for the server to confirm
+ * that the opponent is now connected. This means both players are in the room and
+ * can now begin board setup (placing ships).
+ *
+ * Flow:
+ * 1. Display waiting message to user
+ * 2. Loop waiting for messages from server:
+ *    - If MSG_WAITING: Opponent not yet joined, continue waiting
+ *    - If MSG_OPPONENT_JOINED: Both players are now in room, ready for board setup
+ * 3. Update client state to CLIENT_BOARD_SETUP when opponent joins
+ *
+ * Protocol note:
+ * - MSG_OPPONENT_JOINED signals that the room is full (both players connected)
+ * - This is different from MSG_GAME_START, which comes later after both boards
+ *   are submitted and validated.
+ *
+ * Returns:
+ *   0 on success (opponent joined, both players in room)
+ *   -1 on failure (connection lost, invalid message, etc.)
+ */
+int client_wait_for_opponent(Client *client) {
+    if (client->state != CLIENT_WAITING_FOR_OPPONENT) {
+        fprintf(stderr, "Error: Client must be in WAITING_FOR_OPPONENT state.\n");
+        return -1;
+    }
+
+    printf("\nWaiting for opponent to join the room...\n");
+    printf("(This may take a moment)\n\n");
+
+    /* Loop until opponent joins and room is ready for board setup */
+    Message msg;
+    while (1) {
+        if (receive_message(client->fd, &msg) < 0) {
+            fprintf(stderr, "Error: Connection lost while waiting for opponent.\n");
+            client->state = CLIENT_ERROR;
+            return -1;
+        }
+
+        if (msg.type == MSG_WAITING) {
+            /* Opponent not yet connected; keep waiting */
+            printf("Waiting for opponent to join...\n");
+            continue;
+        } else if (msg.type == MSG_OPPONENT_JOINED) {
+            /* Both players now in room; ready to place ships */
+            printf("Opponent joined! Both players are now in the room.\n");
+            printf("Time to set up your board!\n\n");
+            client->state = CLIENT_BOARD_SETUP;
+            return 0;
+        } else {
+            fprintf(stderr, 
+                "Error: Unexpected message type %d while waiting for opponent.\n",
+                msg.type);
+            client->state = CLIENT_ERROR;
+            return -1;
+        }
+    }
+}
+
+/*
  * client_submit_board - Send the client's board to the server.
  *
  * Flow:
@@ -449,20 +510,36 @@ void client_disconnect(Client *client) {
  *
  * Usage: ./client <hostname> <port>
  *
- * Flow:
+ * Complete client lifecycle flow:
  * 1. Parse command-line arguments (hostname and port)
- * 2. Initialize Client struct
- * 3. Connect to the server
- * 4. Ask user to create a new room or join an existing room
- * 5. Call appropriate room setup function
- * 6. Print status message (game setup to follow)
+ * 2. Initialize Client struct (CLIENT_INIT state)
+ * 3. Connect to the server (CLIENT_CONNECTED state)
+ * 4. Create or join a room (CLIENT_WAITING_FOR_OPPONENT state)
+ *    Server sets us in a room, waiting for second player
+ * 5. Wait for opponent to join (receive MSG_OPPONENT_JOINED)
+ *    When received, room is full and both players ready for setup
+ * 6. Place ships on board (CLIENT_BOARD_SETUP state)
+ * 7. Submit board to server (receive MSG_BOARD_OK)
+ * 8. Wait for MSG_GAME_START (all boards submitted and validated)
+ *    Now state becomes CLIENT_IN_GAME and actual gameplay begins
+ * 9. Enter game play loop (CLIENT_IN_GAME state)
+ * 10. Disconnect after game ends or on fatal error
+ *
+ * PROTOCOL PHASES:
+ * - Room Setup Phase: Create/join room -> wait for MSG_OPPONENT_JOINED
+ * - Board Setup Phase: Place ships locally -> submit board
+ * - Gameplay Phase: Receive MSG_GAME_START -> play game -> MSG_GAME_OVER
+ *
+ * ERROR HANDLING:
+ * - If any critical phase fails, disconnect and exit with error code 1
+ * - Connection loss at any point triggers disconnection
  *
  * Returns:
- *   0 on normal exit
- *   1 on error (invalid args, connection failure, etc.)
+ *   0 on normal exit (game ended normally)
+ *   1 on error (invalid args, connection failure, fatal error)
  */
 int main(int argc, char *argv[]) {
-    /* Validate command-line arguments */
+    /* ========== PHASE 1: PARSE ARGUMENTS AND INITIALIZE ========== */
     if (argc != 3) {
         fprintf(stderr, "Usage: %s <hostname> <port>\n", argv[0]);
         fprintf(stderr, "Example: %s localhost 9999\n", argv[0]);
@@ -477,11 +554,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Initialize the client */
+    /* Initialize the client (Client state: CLIENT_INIT) */
     Client client;
     client_init(&client);
 
-    /* Connect to the server */
+    /* ========== PHASE 2: CONNECT TO SERVER ========== */
+    printf("[PHASE 1] Initializing and connecting...\n");
     printf("Connecting to %s:%d...\n", hostname, port);
     if (client_connect_to_server(&client, port, hostname) < 0) {
         fprintf(stderr, "Failed to connect to server.\n");
@@ -489,18 +567,18 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Ask user whether to create or join a room */
-    printf("\nWould you like to:\n");
+    /* ========== PHASE 3: CREATE OR JOIN ROOM ========== */
+    printf("\n[PHASE 2] Room setup...\n");
+    printf("Would you like to:\n");
     printf("  1) Create a new room\n");
     printf("  2) Join an existing room\n");
     printf("Enter your choice (1 or 2): ");
 
     int choice;
     scanf("%d", &choice);
-    getchar();  /* Consume newline */
+    getchar();  /* Consume newline after input */
 
     if (choice == 1) {
-        /* Create a new room */
         printf("\n--- Creating Room ---\n");
         if (client_create_room(&client) < 0) {
             fprintf(stderr, "Failed to create room.\n");
@@ -508,7 +586,6 @@ int main(int argc, char *argv[]) {
             return 1;
         }
     } else if (choice == 2) {
-        /* Join an existing room */
         printf("\n--- Joining Room ---\n");
         if (client_join_room(&client) < 0) {
             fprintf(stderr, "Failed to join room.\n");
@@ -521,16 +598,46 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Lobby setup complete; waiting for opponent and game start */
-    printf("\n========================================\n");
-    printf("Ready for next phase:\n");
-    printf("- Waiting for opponent to join/connect\n");
-    printf("- Next: Board setup and game start\n");
-    printf("========================================\n");
+    /* ========== PHASE 3: WAIT FOR OPPONENT (ROOM-READY PHASE) ========== */
+    /* Wait for MSG_OPPONENT_JOINED: both players now in room, ready for board setup */
+    printf("\n[PHASE 3] Waiting for opponent to join the room...\n");
+    printf("(Board setup will begin once opponent joins)\n");
+    if (client_wait_for_opponent(&client) < 0) {
+        fprintf(stderr, "\nFailed while waiting for opponent.\n");
+        client_disconnect(&client);
+        return 1;
+    }
 
-    /* Cleanup and exit */
+    /* ========== PHASE 4: PLACE SHIPS (BOARD SETUP PHASE) ========== */
+    printf("\n[PHASE 4] Placing ships on your board...\n");
+    if (client_place_ships(&client) < 0) {
+        fprintf(stderr, "\nFailed to place ships.\n");
+        client_disconnect(&client);
+        return 1;
+    }
+
+    /* ========== PHASE 5: SUBMIT BOARD (BOARD VALIDATION + GAME START) ========== */
+    /* Submit board and wait for MSG_BOARD_OK, then MSG_GAME_START (both boards ready) */
+    printf("\n[PHASE 5] Submitting board to server...\n");
+    printf("Waiting for opponent's board and game start signal...\n");
+    if (client_submit_board(&client) < 0) {
+        fprintf(stderr, "\nFailed to submit board.\n");
+        client_disconnect(&client);
+        return 1;
+    }
+
+    /* ========== PHASE 6: PLAY GAME (GAMEPLAY PHASE) ========== */
+    printf("\n[PHASE 6] Starting game play...\n");
+    if (client_play_game(&client) < 0) {
+        fprintf(stderr, "\nGame play ended with an error.\n");
+        client_disconnect(&client);
+        return 1;
+    }
+
+    /* ========== PHASE 7: DISCONNECT AFTER GAME ENDS ========== */
+    printf("\n[PHASE 7] Game complete. Disconnecting...\n");
     client_disconnect(&client);
-    printf("\nClient disconnected.\n");
+    printf("Client disconnected.\n");
 
     return 0;
 }

@@ -152,6 +152,30 @@ int client_place_ships(Client *client);
 int client_submit_board(Client *client);
 
 /*
+ * client_wait_for_opponent - Wait for the opponent to join the room.
+ *
+ * After creating or joining a room, this blocking function waits for the server
+ * to send MSG_OPPONENT_JOINED, indicating that both players are now in the room.
+ * This signals that board setup (ship placement) can begin.
+ *
+ * The function may receive MSG_WAITING in the interim while still waiting for
+ * the opponent to connect.
+ *
+ * Protocol:
+ * - Expects to receive: MSG_WAITING (while waiting) or MSG_OPPONENT_JOINED (opponent joined)
+ * - MSG_OPPONENT_JOINED means room is full, time for board setup
+ * - Different from MSG_GAME_START, which comes after board submission
+ *
+ * Parameters:
+ *   client - pointer to the Client struct
+ *
+ * Returns:
+ *   0 on success (opponent joined, room ready)
+ *   -1 on failure (connection lost, invalid message, etc.)
+ */
+int client_wait_for_opponent(Client *client);
+
+/*
  * client_play_game - Main game loop for the client.
  *
  * Enters the game phase. Repeatedly:
