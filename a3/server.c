@@ -228,6 +228,16 @@ void handle_client_message(Client clients[], Room rooms[], int client_index) {
                 break;
             }
 
+            /* Send MSG_WAITING_FOR_OPPONENT_JOIN to indicate waiting for opponent to join */
+            Message waiting;
+            memset(&waiting, 0, sizeof(Message));
+            waiting.type = MSG_WAITING_FOR_OPPONENT_JOIN;
+            waiting.room_id = room_id;
+            waiting.player_id = player_id;
+            if (send_message(client->socket_fd, &waiting) < 0) {
+                printf("Failed to send MSG_WAITING_FOR_OPPONENT_JOIN to player\n");
+            }
+
             printf("Room %d created with client %d as player %d\n", room_id, client_index, player_id);
             break;
         }
@@ -259,6 +269,29 @@ void handle_client_message(Client clients[], Room rooms[], int client_index) {
                 printf("Failed to send MSG_JOIN_OK to client %d\n", client_index);
                 remove_client(clients, rooms, client_index);
                 break;
+            }
+
+            /* Send MSG_OPPONENT_JOINED to the new joiner */
+            Message waiting;
+            memset(&waiting, 0, sizeof(Message));
+            waiting.type = MSG_OPPONENT_JOINED;
+            waiting.room_id = msg.room_id;
+            waiting.player_id = player_id;
+            if (send_message(client->socket_fd, &waiting) < 0) {
+                printf("Failed to send MSG_OPPONENT_JOINED to joining player\n");
+            }
+
+            /* Notify the other player that opponent has joined */
+            Room *room = find_room(rooms, msg.room_id);
+            if (room != NULL && room->connected_players[1 - player_id] != NULL) {
+                Message opp_waiting;
+                memset(&opp_waiting, 0, sizeof(Message));
+                opp_waiting.type = MSG_OPPONENT_JOINED;
+                opp_waiting.room_id = msg.room_id;
+                opp_waiting.player_id = 1 - player_id;
+                if (send_message(room->connected_players[1 - player_id]->socket_fd, &opp_waiting) < 0) {
+                    printf("Failed to send MSG_OPPONENT_JOINED to existing player\n");
+                }
             }
 
             printf("Client %d joined room %d as player %d\n", client_index, msg.room_id, player_id);
@@ -308,6 +341,19 @@ void handle_client_message(Client clients[], Room rooms[], int client_index) {
             }
 
             printf("Sent MSG_BOARD_OK to player %d\n", client->assigned_player_id);
+
+            /* Send MSG_WAITING_FOR_OPPONENT_BOARD to indicate waiting for opponent's board */
+            int opponent_player_id = 1 - client->assigned_player_id;
+            if (room->connected_players[opponent_player_id] != NULL) {
+                Message opp_waiting;
+                memset(&opp_waiting, 0, sizeof(Message));
+                opp_waiting.type = MSG_WAITING_FOR_OPPONENT_BOARD;
+                opp_waiting.room_id = room->room_id;
+                opp_waiting.player_id = opponent_player_id;
+                if (send_message(room->connected_players[opponent_player_id]->socket_fd, &opp_waiting) < 0) {
+                    printf("Failed to send MSG_WAITING_FOR_OPPONENT_BOARD to opponent\n");
+                }
+            }
 
             /* Check if both players have submitted their boards */
             if (room->player_boards_submitted[0] == 1 && room->player_boards_submitted[1] == 1) {
@@ -658,18 +704,12 @@ void end_game_and_disconnect(Client clients[], Room rooms[], Room *room,
     /* Disconnect both players and clean up room */
     printf("[SERVER] Cleaning up game in room %d\n", room->room_id);
     
-    /* Find and remove opponent by searching clients array */
+    /* Remove both players from room */
     for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (clients[i].is_connected && 
-            clients[i].assigned_room_id == room->room_id &&
-            clients[i].assigned_player_id == opponent_id) {
+        if (clients[i].is_connected && clients[i].assigned_room_id == room->room_id) {
             remove_client(clients, rooms, i);
-            break;
         }
     }
-    
-    /* Remove current player (caller) */
-    remove_client(clients, rooms, client_index);
 }
 
 /*
