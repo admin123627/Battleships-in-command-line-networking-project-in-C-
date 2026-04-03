@@ -265,15 +265,146 @@ void handle_client_message(Client clients[], Room rooms[], int client_index) {
             break;
         }
 
-        case MSG_SUBMIT_BOARD:
+        case MSG_SUBMIT_BOARD: {
             printf("Client %d submitted board\n", client_index);
-            // TODO: Implement board submission (deferred)
-            break;
+            
+            /* Find the room this client is in */
+            Room *room = find_room(rooms, client->assigned_room_id);
+            if (room == NULL) {
+                printf("Error: Client %d not in a valid room\n", client_index);
+                send_error(client->socket_fd, "Not in a valid room");
+                break;
+            }
 
-        case MSG_SHOOT:
-            printf("Client %d sent shot\n", client_index);
-            // TODO: Implement gameplay (deferred)
+            /* Validate client state - must be waiting for opponent */
+            if (client->assigned_player_id < 0 || client->assigned_player_id >= ROOM_SIZE) {
+                printf("Error: Client %d has invalid player_id %d\n", client_index, client->assigned_player_id);
+                send_error(client->socket_fd, "Invalid player ID");
+                break;
+            }
+
+            /* Validate and place all ships on the board */
+            Board *player_board = &room->game.boards[client->assigned_player_id];
+            if (validate_and_place_board_ships(player_board, msg.ships, client->socket_fd) == 0) {
+                break;
+            }
+
+            /* Mark that this player has submitted their board */
+            room->player_boards_submitted[client->assigned_player_id] = 1;
+            printf("[SERVER] Player %d in room %d submitted board\n", 
+                   client->assigned_player_id, room->room_id);
+
+            /* Send MSG_BOARD_OK response */
+            Message response;
+            memset(&response, 0, sizeof(Message));
+            response.type = MSG_BOARD_OK;
+            response.room_id = room->room_id;
+            response.player_id = client->assigned_player_id;
+
+            if (send_message(client->socket_fd, &response) < 0) {
+                printf("Failed to send MSG_BOARD_OK to client %d\n", client_index);
+                remove_client(clients, rooms, client_index);
+                break;
+            }
+
+            printf("Sent MSG_BOARD_OK to player %d\n", client->assigned_player_id);
+
+            /* Check if both players have submitted their boards */
+            if (room->player_boards_submitted[0] == 1 && room->player_boards_submitted[1] == 1) {
+                start_game_when_ready(room);
+            }
+
             break;
+        }
+
+        case MSG_SHOOT: {
+            printf("Client %d sent shot at (%d, %d)\n", client_index, msg.x, msg.y);
+
+            /* Find the room this client is in */
+            Room *room = find_room(rooms, client->assigned_room_id);
+            if (room == NULL) {
+                printf("Error: Client %d not in a valid room\n", client_index);
+                send_error(client->socket_fd, "Not in a valid room");
+                break;
+            }
+
+            /* Verify game has actually started */
+            if (room->is_game_started != 1) {
+                printf("[SERVER] Player %d tried to shoot but game hasn't started\n", client_index);
+                send_error(client->socket_fd, "Game hasn't started yet");
+                break;
+            }
+
+            /* Verify it's this player's turn */
+            if (room->game.current_turn != client->assigned_player_id) {
+                printf("[SERVER] Player %d tried to shoot but it's player %d's turn\n", 
+                       client->assigned_player_id, room->game.current_turn);
+                send_error(client->socket_fd, "Not your turn");
+                break;
+            }
+
+            /* Validate shot coordinates */
+            if (!in_bounds(msg.x, msg.y)) {
+                printf("[SERVER] Invalid coordinates (%d, %d) from player %d\n", 
+                       msg.x, msg.y, client->assigned_player_id);
+                send_error(client->socket_fd, "Coordinates out of bounds (0-9)");
+                break;
+            }
+
+            /* Get opponent ID and their board */
+            int opponent_id = 1 - client->assigned_player_id;
+            Board *opponent_board = &room->game.boards[opponent_id];
+
+            /* Process the shot */
+            ShotResult result = take_shot(opponent_board, msg.x, msg.y);
+            printf("[SERVER] Player %d shot at (%d, %d): %d\n", 
+                   client->assigned_player_id, msg.x, msg.y, result);
+
+            /* Send MSG_SHOT_RESULT back to shooter */
+            Message response;
+            memset(&response, 0, sizeof(Message));
+            response.type = MSG_SHOT_RESULT;
+            response.room_id = room->room_id;
+            response.player_id = client->assigned_player_id;
+            response.x = msg.x;
+            response.y = msg.y;
+            response.shot_result = result;
+
+            if (send_message(client->socket_fd, &response) < 0) {
+                printf("Failed to send MSG_SHOT_RESULT to player %d\n", client->assigned_player_id);
+                remove_client(clients, rooms, client_index);
+                break;
+            }
+
+            /* Send MSG_INCOMING_SHOT to opponent */
+            Message incoming;
+            memset(&incoming, 0, sizeof(Message));
+            incoming.type = MSG_INCOMING_SHOT;
+            incoming.room_id = room->room_id;
+            incoming.player_id = opponent_id;
+            incoming.x = msg.x;
+            incoming.y = msg.y;
+            incoming.shot_result = result;
+
+            if (send_message(room->connected_players[opponent_id]->socket_fd, &incoming) < 0) {
+                printf("Failed to send MSG_INCOMING_SHOT to player %d\n", opponent_id);
+            }
+
+            /* Check if game is over (opponent lost) */
+            if (all_ships_sunk(opponent_board)) {
+                end_game_and_disconnect(clients, rooms, room, client->assigned_player_id, client_index);
+            } else {
+                /* Game continues - switch turns */
+                room->game.current_turn = 1 - room->game.current_turn;
+                printf("[SERVER] Turn switched to player %d in room %d\n", 
+                       room->game.current_turn, room->room_id);
+
+                /* Send turn messages */
+                send_turn_messages(room, room->game.current_turn);
+            }
+
+            break;
+        }
 
         case MSG_DISCONNECT:
             printf("Client %d disconnecting\n", client_index);
@@ -311,6 +442,9 @@ int create_room(Room rooms[]) {
             rooms[i].player_boards_submitted[1] = 0;
             rooms[i].connected_players[0] = NULL;
             rooms[i].connected_players[1] = NULL;
+
+            /* Initialize game state for this room */
+            init_game(&rooms[i].game);
 
             printf("[SERVER] Created room %d\n", rooms[i].room_id);
             return rooms[i].room_id;
@@ -386,6 +520,202 @@ int join_room(Room rooms[], Client *client, int room_id) {
 
     printf("[SERVER] Client added to room %d as player %d\n", room_id, player_id);
     return player_id;
+}
+
+/*
+ * validate_and_place_board_ships - Validate and place all ships from a board submission.
+ *
+ * Converts ShipPlacement structures to Ship structures, validates placement on the board,
+ * and places them. If any ship fails validation, sends error to client and returns 0.
+ *
+ * Parameters:
+ *   board - pointer to the Board to place ships on
+ *   ships - array of ShipPlacement structures from client message
+ *   socket_fd - client socket to send error to if validation fails
+ *
+ * Returns:
+ *   1 on success (all ships placed)
+ *   0 on failure (any ship placement failed)
+ */
+int validate_and_place_board_ships(Board *board, ShipPlacement ships[], int socket_fd) {
+    for (int i = 0; i < MAX_SHIPS; i++) {
+        ShipPlacement placement = ships[i];
+        
+        /* Create Ship from ShipPlacement */
+        Ship ship;
+        ship.x = placement.x;
+        ship.y = placement.y;
+        ship.length = placement.length;
+        ship.orientation = placement.orientation;
+        ship.hits = 0;
+        ship.sunk = 0;
+        
+        /* Place ship on the board */
+        if (place_ship(board, ship) < 0) {
+            printf("Error: Failed to place ship %d\n", i);
+            send_error(socket_fd, "Board validation failed - invalid ship placement");
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+/*
+ * start_game_when_ready - Start the game when both players have submitted boards.
+ *
+ * Sends MSG_GAME_START to both players, initializes turn (player 0 first),
+ * and sends initial turn messages to both players.
+ *
+ * Parameters:
+ *   room - pointer to the Room to start
+ *
+ * Returns:
+ *   void
+ */
+void start_game_when_ready(Room *room) {
+    printf("[SERVER] Both players in room %d have submitted boards! Starting game.\n", 
+           room->room_id);
+
+    /* Ensure both players are still connected before sending game start */
+    if (room->connected_players[0] == NULL || room->connected_players[1] == NULL) {
+        printf("[SERVER] Error: A player disconnected before game start\n");
+        return;
+    }
+
+    /* Send MSG_GAME_START to both players */
+    Message game_start;
+    memset(&game_start, 0, sizeof(Message));
+    game_start.type = MSG_GAME_START;
+    game_start.room_id = room->room_id;
+
+    /* Send to player 0 */
+    game_start.player_id = 0;
+    if (send_message(room->connected_players[0]->socket_fd, &game_start) < 0) {
+        printf("Failed to send MSG_GAME_START to player 0\n");
+    }
+
+    /* Send to player 1 */
+    game_start.player_id = 1;
+    if (send_message(room->connected_players[1]->socket_fd, &game_start) < 0) {
+        printf("Failed to send MSG_GAME_START to player 1\n");
+    }
+
+    /* Mark game as started and initialize turn */
+    room->is_game_started = 1;
+    room->game.current_turn = 0;
+    printf("[SERVER] Game started in room %d. Player 0's turn.\n", room->room_id);
+
+    /* Send initial turn messages */
+    send_turn_messages(room, 0);
+}
+
+/*
+ * end_game_and_disconnect - End the game, notify players, and disconnect both.
+ *
+ * Sends MSG_GAME_OVER to both players with the winner_id, then disconnects
+ * both clients and cleans up the room.
+ *
+ * Parameters:
+ *   clients - array of Client structures
+ *   rooms - array of Room structures
+ *   room - pointer to the Room where game ended
+ *   winner_player_id - player ID (0 or 1) who won
+ *   client_index - index of the client who sent the winning shot
+ *
+ * Returns:
+ *   void
+ */
+void end_game_and_disconnect(Client clients[], Room rooms[], Room *room, 
+                              int winner_player_id, int client_index) {
+    int opponent_id = 1 - winner_player_id;
+
+    printf("[SERVER] All ships sunk! Player %d wins in room %d!\n", 
+           winner_player_id, room->room_id);
+
+    /* Send MSG_GAME_OVER to both players */
+    Message game_over;
+    memset(&game_over, 0, sizeof(Message));
+    game_over.type = MSG_GAME_OVER;
+    game_over.room_id = room->room_id;
+    game_over.winner_id = winner_player_id;
+
+    /* Send to winner */
+    if (send_message(clients[client_index].socket_fd, &game_over) < 0) {
+        printf("Failed to send MSG_GAME_OVER to winner\n");
+    }
+
+    /* Send to loser */
+    if (room->connected_players[opponent_id] != NULL) {
+        if (send_message(room->connected_players[opponent_id]->socket_fd, &game_over) < 0) {
+            printf("Failed to send MSG_GAME_OVER to loser\n");
+        }
+    }
+
+    /* Mark game as over */
+    room->is_game_started = 0;
+
+    /* Disconnect both players and clean up room */
+    printf("[SERVER] Cleaning up game in room %d\n", room->room_id);
+    
+    /* Find and remove opponent by searching clients array */
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i].is_connected && 
+            clients[i].assigned_room_id == room->room_id &&
+            clients[i].assigned_player_id == opponent_id) {
+            remove_client(clients, rooms, i);
+            break;
+        }
+    }
+    
+    /* Remove current player (caller) */
+    remove_client(clients, rooms, client_index);
+}
+
+/*
+ * send_turn_messages - Send turn notification messages to both players.
+ *
+ * Tells the current player it's their turn, and tells the other player to wait.
+ * Called after initialization and after each shot to transition turns.
+ *
+ * Parameters:
+ *   room - pointer to the Room
+ *   current_player_id - player ID who's turn it is (0 or 1)
+ *
+ * Returns:
+ *   void
+ */
+void send_turn_messages(Room *room, int current_player_id) {
+    int opponent_id = 1 - current_player_id;
+
+    /* Verify both players are still connected */
+    if (room->connected_players[current_player_id] == NULL || 
+        room->connected_players[opponent_id] == NULL) {
+        printf("[SERVER] Warning: Cannot send turn messages - a player disconnected\n");
+        return;
+    }
+
+    /* Send MSG_YOUR_TURN to current player */
+    Message your_turn;
+    memset(&your_turn, 0, sizeof(Message));
+    your_turn.type = MSG_YOUR_TURN;
+    your_turn.room_id = room->room_id;
+    your_turn.player_id = current_player_id;
+
+    if (send_message(room->connected_players[current_player_id]->socket_fd, &your_turn) < 0) {
+        printf("[SERVER] Failed to send MSG_YOUR_TURN to player %d\n", current_player_id);
+    }
+
+    /* Send MSG_WAIT_TURN to opponent */
+    Message wait_turn;
+    memset(&wait_turn, 0, sizeof(Message));
+    wait_turn.type = MSG_WAIT_TURN;
+    wait_turn.room_id = room->room_id;
+    wait_turn.player_id = opponent_id;
+
+    if (send_message(room->connected_players[opponent_id]->socket_fd, &wait_turn) < 0) {
+        printf("[SERVER] Failed to send MSG_WAIT_TURN to player %d\n", opponent_id);
+    }
 }
 
 /*

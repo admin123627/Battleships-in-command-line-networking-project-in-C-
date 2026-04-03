@@ -58,6 +58,10 @@ void handle_submit_board(Room *room, Client *client, Message *msg);
 
 /* Gameplay */
 void handle_shot(Room *room, Client *client, Message *msg);
+void send_turn_messages(Room *room, int current_player_id);
+int validate_and_place_board_ships(Board *board, ShipPlacement ships[], int socket_fd);
+void start_game_when_ready(Room *room);
+void end_game_and_disconnect(Client clients[], Room rooms[], Room *room, int winner_player_id, int client_index);
 Client *get_opponent(Room *room, Client *client);
 
 /* Utility */
