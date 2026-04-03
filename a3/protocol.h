@@ -17,14 +17,12 @@ typedef struct {
 /* All message types exchanged between client and server. */
 typedef enum {
     /* Room setup */
-    MSG_CREATE_ROOM,              // Client -> Server
-    MSG_ROOM_CREATED,             // Server -> Client
-    MSG_JOIN_ROOM,                // Client -> Server
-    MSG_JOIN_OK,                  // Server -> Client
-    MSG_WAITING_FOR_OPPONENT_JOIN, // Server -> Client
-    MSG_OPPONENT_JOINED,          // Server -> Client
-    MSG_WAITING_FOR_OPPONENT_BOARD, // Server -> Client
-    MSG_GAME_START,               // Server -> Client
+    MSG_CREATE_ROOM,     // Client -> Server
+    MSG_ROOM_CREATED,    // Server -> Client
+    MSG_JOIN_ROOM,       // Client -> Server
+    MSG_JOIN_OK,         // Server -> Client
+    MSG_OPPONENT_JOINED, // Server -> Client
+    MSG_GAME_START,      // Server -> Client
 
     /* Board setup */
     MSG_SUBMIT_BOARD,    // Client -> Server
