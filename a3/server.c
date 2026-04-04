@@ -878,10 +878,13 @@ void remove_client(Client clients[], Room rooms[], int client_index) {
                 printf("[SERVER] Player %d disconnected from active game in room %d\n", 
                        client->assigned_player_id, room->room_id);
                 
-                /* Notify remaining player */
+                /* Notify remaining player with MSG_OPPONENT_LEFT */
                 if (room->connected_players[other_player] != NULL) {
-                    send_error(room->connected_players[other_player]->socket_fd, 
-                              "Opponent disconnected! Game will end in 30 seconds if they don't reconnect.");
+                    Message disconnect_msg;
+                    memset(&disconnect_msg, 0, sizeof(Message));
+                    disconnect_msg.type = MSG_OPPONENT_LEFT;
+                    disconnect_msg.room_id = room->room_id;
+                    send_message(room->connected_players[other_player]->socket_fd, &disconnect_msg);
                 }
                 
                 /* Set cleanup deadline */

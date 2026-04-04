@@ -607,6 +607,14 @@ int client_play_game(Client *client) {
                 game_running = 0;  /* Exit the game loop */
                 break;
 
+            /* ===== OPPONENT DISCONNECTED ===== */
+            case MSG_OPPONENT_LEFT:
+                printf("\n*** Opponent has disconnected! ***\n");
+                printf("Waiting for opponent to reconnect... (30 second timeout)\n");
+                fflush(stdout);
+                /* Continue waiting - do NOT exit. Loop continues to wait for reconnection. */
+                break;
+
             /* ===== ERROR FROM SERVER ===== */
             case MSG_ERROR:
                 fprintf(stderr, "Server error: %s\n", msg.error_msg);
