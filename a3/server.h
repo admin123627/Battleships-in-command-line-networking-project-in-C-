@@ -6,8 +6,8 @@
 #include "protocol.h"
 
 #define PORT 9999
-#define MAX_CLIENTS 20
-#define MAX_ROOMS 10
+#define MAX_CLIENTS 100
+#define MAX_ROOMS 50
 #define ROOM_SIZE 2
 
 /* Represents one connected client on the server. */
