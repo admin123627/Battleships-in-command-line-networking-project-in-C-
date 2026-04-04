@@ -88,4 +88,22 @@ int validate_ship_placement(Board *board, ShipPlacement placement);
  */
 void print_board(const Board *board, int reveal_ships);
 
+/*
+ * shot_already_taken - Check if a shot has already been fired at a cell.
+ *
+ * Checks the enemy_view board to see if the given coordinates have already
+ * been targeted (marked as CELL_HIT or CELL_MISS). Used for client-side
+ * validation to prevent duplicate shots.
+ *
+ * Parameters:
+ *   enemy_view - pointer to the Board representing the opponent's board view
+ *   x - column coordinate (0-9)
+ *   y - row coordinate (0-9)
+ *
+ * Returns:
+ *   1 if the cell has already been shot at (CELL_HIT or CELL_MISS)
+ *   0 if the cell is empty (CELL_EMPTY) or out of bounds
+ */
+int shot_already_taken(const Board *enemy_view, int x, int y);
+
 #endif /* UTILS_H */

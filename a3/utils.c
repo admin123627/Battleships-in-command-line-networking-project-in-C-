@@ -178,3 +178,21 @@ void print_board(const Board *board, int reveal_ships) {
     }
     printf("\n");
 }
+
+/*
+ * shot_already_taken - Check if a shot has already been fired at a cell.
+ *
+ * Looks up the cell state in enemy_view to determine if coordinates have
+ * already been targeted. Used to validate client-side shot attempts.
+ *
+ * Returns:
+ *   1 if cell is CELL_HIT or CELL_MISS (already targeted)
+ *   0 if cell is CELL_EMPTY or out of bounds (valid shot)
+ */
+int shot_already_taken(const Board *enemy_view, int x, int y) {
+    if (!in_bounds(x, y)) {
+        return 0;  /* Out of bounds is already handled by get_player_input */
+    }
+    CellState cell = enemy_view->cells[y][x];
+    return (cell == CELL_HIT || cell == CELL_MISS);
+}

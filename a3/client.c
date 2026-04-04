@@ -496,14 +496,29 @@ int client_play_game(Client *client) {
                 printf("Current view of opponent's board:\n");
                 print_board(&client->enemy_view, 0);
 
-                /* Prompt player for shot coordinates using helper function */
+                /* Keep prompting until player selects a valid fresh cell (not already targeted) */
                 int x, y;
-                if (get_player_input(&x, &y) < 0) {
-                    fprintf(stderr, "Error: Failed to read coordinates.\n");
-                    return -1;
+                while (1) {
+                    /* Prompt player for shot coordinates using helper function */
+                    if (get_player_input(&x, &y) < 0) {
+                        fprintf(stderr, "Error: Failed to read coordinates.\n");
+                        return -1;
+                    }
+
+                    /* Check if this cell has already been targeted locally.
+                     * Client-side validation prevents wasted server round-trips and gives
+                     * the player immediate feedback if they pick a cell they've already shot at.
+                     * This improves UX significantly. */
+                    if (shot_already_taken(&client->enemy_view, x, y)) {
+                        printf("You already fired at (%d, %d)! Choose a different cell.\n", x, y);
+                        continue;  /* Prompt again */
+                    }
+
+                    /* Valid shot: cell has not been targeted yet, break out of validation loop */
+                    break;
                 }
 
-                /* Create and send MSG_SHOOT message with coordinates */
+                /* Create and send MSG_SHOOT message with validated coordinates */
                 Message shoot_msg;
                 memset(&shoot_msg, 0, sizeof(Message));
                 shoot_msg.type = MSG_SHOOT;
