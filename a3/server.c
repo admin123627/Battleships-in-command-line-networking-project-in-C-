@@ -417,13 +417,22 @@ void handle_client_message(Client clients[], Room rooms[], int client_index) {
             if (all_ships_sunk(opponent_board)) {
                 end_game_and_disconnect(clients, rooms, room, client->assigned_player_id, client_index);
             } else {
-                /* Game continues - switch turns */
-                room->game.current_turn = 1 - room->game.current_turn;
-                printf("[SERVER] Turn switched to player %d in room %d\n", 
-                       room->game.current_turn, room->room_id);
-
-                /* Send turn messages */
-                send_turn_messages(room, room->game.current_turn);
+                /* Check shot result to determine whose turn is next */
+                if (result == SHOT_HIT || result == SHOT_SUNK) {
+                    /* Player gets another turn on HIT or SUNK */
+                    printf("[SERVER] Hit/Sunk! Player %d gets another turn\n", client->assigned_player_id);
+                    send_turn_messages(room, room->game.current_turn);
+                } else if (result == SHOT_MISS) {
+                    /* Switch to opponent's turn on MISS */
+                    room->game.current_turn = 1 - room->game.current_turn;
+                    printf("[SERVER] Miss! Turn switched to player %d in room %d\n", 
+                           room->game.current_turn, room->room_id);
+                    send_turn_messages(room, room->game.current_turn);
+                } else {
+                    /* SHOT_INVALID - shouldn't happen, but keep current turn */
+                    printf("[SERVER] Invalid shot? Keeping same player's turn\n");
+                    send_turn_messages(room, room->game.current_turn);
+                }
             }
 
             break;
