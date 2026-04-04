@@ -27,14 +27,41 @@ void init_game(Game *game) {
 int can_place_ship(Board *board, Ship ship) {
 	int dx = (ship.orientation == HORIZONTAL) ? 1 : 0;
 	int dy = (ship.orientation == VERTICAL) ? 1 : 0;
+	
+	/* First, check if all cells of the ship are in bounds and empty */
 	for (int i = 0; i < ship.length; i++) {
 		int col = ship.x + i * dx;
-        int row = ship.y + i * dy;
-        // Check if the position is out of bounds or already occupied
-        if (!in_bounds(col, row) || board->cells[row][col] != CELL_EMPTY) {
-            return 0;
-        }
+		int row = ship.y + i * dy;
+		/* Check if the position is out of bounds or already occupied */
+		if (!in_bounds(col, row) || board->cells[row][col] != CELL_EMPTY) {
+			return 0;
+		}
 	}
+	
+	/* Now check that no adjacent cells (including diagonals) contain ships.
+	 * This ensures ships cannot touch each other at all - not horizontally,
+	 * vertically, OR diagonally. We check each of the 8 neighboring cells
+	 * around each cell occupied by the new ship. */
+	for (int i = 0; i < ship.length; i++) {
+		int col = ship.x + i * dx;
+		int row = ship.y + i * dy;
+		
+		/* Check all 8 neighboring cells (and the ship cell itself is already checked) */
+		for (int adj_row = row - 1; adj_row <= row + 1; adj_row++) {
+			for (int adj_col = col - 1; adj_col <= col + 1; adj_col++) {
+				/* Skip the center cell (the ship cell itself, already validated) */
+				if (adj_row == row && adj_col == col) {
+					continue;
+				}
+				
+				/* If neighboring cell is in bounds and contains a ship, placement is invalid */
+				if (in_bounds(adj_col, adj_row) && board->cells[adj_row][adj_col] == CELL_SHIP) {
+					return 0;
+				}
+			}
+		}
+	}
+	
 	return 1;
 }	
 

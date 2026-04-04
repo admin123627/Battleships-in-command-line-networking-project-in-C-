@@ -84,7 +84,7 @@ int get_player_input(int *x, int *y) {
     int result;
 
     while (1) {
-        printf("Enter shot coordinates (x y, both 0-9): ");
+        printf("Enter coordinates (x y, both 0-9): ");
         result = scanf("%d %d", x, y);
 
         // Check for read failure
