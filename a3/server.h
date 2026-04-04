@@ -2,6 +2,7 @@
 #define SERVER_H
 
 #include <netinet/in.h>
+#include <time.h>
 #include "game.h"
 #include "protocol.h"
 
@@ -9,6 +10,7 @@
 #define MAX_CLIENTS 100
 #define MAX_ROOMS 50
 #define ROOM_SIZE 2
+#define DISCONNECT_TIMEOUT 30  /* Wait 30 seconds for reconnection */
 
 /* Represents one connected client on the server. */
 typedef struct {
@@ -32,6 +34,9 @@ typedef struct {
 
     Client *connected_players[ROOM_SIZE]; // pointers to the two clients in this room
     Game game; // authoritative game state
+
+    /* Disconnection handling */
+    time_t cleanup_deadline; // when to force cleanup remaining player (-1 if not needed)
 } Room;
 
 /* Core server loop */
@@ -40,6 +45,7 @@ void run_server(int listen_fd, Client clients[], Room rooms[]);
 /* Connection handling */
 void handle_new_connection(int listen_fd, Client clients[]);
 void remove_client(Client clients[], Room rooms[], int client_index);
+void check_disconnection_timeouts(Client clients[], Room rooms[]);
 
 /* Messaging */
 int send_message(int fd, Message *msg);

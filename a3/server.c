@@ -54,6 +54,7 @@ int main(void) {
         rooms[i].player_boards_submitted[1] = 0;
         rooms[i].connected_players[0] = NULL;
         rooms[i].connected_players[1] = NULL;
+        rooms[i].cleanup_deadline = -1;
     }
 
     printf("Server initialized. Waiting for clients...\n");
@@ -86,6 +87,9 @@ int main(void) {
  */
 void run_server(int listen_fd, Client clients[], Room rooms[]) {
     while (1) {
+        /* Check if any rooms need cleanup after disconnection */
+        check_disconnection_timeouts(clients, rooms);
+
         /* Set up fd_set for select() monitoring */
         fd_set readfds;
         FD_ZERO(&readfds);
@@ -510,11 +514,11 @@ Room *find_room(Room rooms[], int room_id) {
 }
 
 /*
- * join_room - Add a client to a room.
+ * join_room - Add a client to a room or reconnect a disconnected player.
  *
- * Finds the specified room and adds the client to it.
- * Assigns player_id based on current_player_count (0 for first, 1 for second).
- * Prints debug messages to server console only.
+ * Finds the specified room and adds the client to it. If a game is in progress
+ * and a player slot is empty (player disconnected), allows reconnection to that slot.
+ * Otherwise assigns player_id based on current_player_count (0 for first, 1 for second).
  *
  * Parameters:
  *   rooms - array of Room structures
@@ -533,7 +537,36 @@ int join_room(Room rooms[], Client *client, int room_id) {
         return -1;
     }
 
-    /* Check if room has space */
+    /* If game is in progress, check for empty player slot (reconnection case) */
+    if (room->is_game_started) {
+        for (int i = 0; i < ROOM_SIZE; i++) {
+            if (room->connected_players[i] == NULL) {
+                /* Found empty slot - this is a reconnection */
+                room->connected_players[i] = client;
+                client->assigned_player_id = i;
+                client->assigned_room_id = room_id;
+                
+                /* Clear cleanup deadline since player reconnected */
+                room->cleanup_deadline = -1;
+                
+                printf("[SERVER] Player rejoined room %d at slot %d (game resumes)\n", room_id, i);
+                
+                /* Notify other player that opponent is back */
+                int other_player = 1 - i;
+                if (room->connected_players[other_player] != NULL) {
+                    Message msg;
+                    memset(&msg, 0, sizeof(Message));
+                    msg.type = MSG_YOUR_TURN;  /* Signal to resume */
+                    msg.room_id = room_id;
+                    send_message(room->connected_players[other_player]->socket_fd, &msg);
+                }
+                
+                return i;
+            }
+        }
+    }
+
+    /* Normal join - both slots filled or game not started */
     if (room->current_player_count >= ROOM_SIZE) {
         printf("[SERVER] Room %d is full\n", room_id);
         return -1;
@@ -778,10 +811,50 @@ int send_error(int fd, const char *msg) {
 }
 
 /*
+ * check_disconnection_timeouts - Force cleanup of remaining player if timeout expires.
+ *
+ * When a player disconnects during an active game, sets a 30-second deadline.
+ * If the deadline expires, disconnect the remaining player and deactivate the room.
+ *
+ * Parameters:
+ *   clients - array of Client structures
+ *   rooms - array of Room structures
+ *
+ * Returns:
+ *   void
+ */
+void check_disconnection_timeouts(Client clients[], Room rooms[]) {
+    time_t now = time(NULL);
+    
+    for (int i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].is_active && rooms[i].cleanup_deadline > 0) {
+            if (now >= rooms[i].cleanup_deadline) {
+                printf("[SERVER] Disconnection timeout in room %d. Closing room.\n", rooms[i].room_id);
+                
+                /* Find and disconnect the remaining player */
+                for (int j = 0; j < MAX_CLIENTS; j++) {
+                    if (clients[j].is_connected && 
+                        clients[j].assigned_room_id == rooms[i].room_id) {
+                        printf("[SERVER] Disconnecting remaining player %d from room %d\n", j, rooms[i].room_id);
+                        send_error(clients[j].socket_fd, "Game ended - opponent did not reconnect within 30 seconds.");
+                        remove_client(clients, rooms, j);
+                        break;
+                    }
+                }
+                
+                /* Deactivate the room */
+                rooms[i].is_active = 0;
+                rooms[i].cleanup_deadline = -1;
+            }
+        }
+    }
+}
+
+/*
  * remove_client - Remove a client and clean up resources.
  *
- * Closes the client's socket, removes them from any room, and marks the slot as inactive.
- * Will yuse when game ends.
+ * If a player disconnects during an active game, notifies the opponent and schedules
+ * automatic cleanup in 30 seconds. Otherwise, removes them from the room.
  * 
  * Parameters:
  *   clients - array of Client structures
@@ -794,11 +867,34 @@ int send_error(int fd, const char *msg) {
 void remove_client(Client clients[], Room rooms[], int client_index) {
     Client *client = &clients[client_index];
 
-    /* If client was in a room, remove them from it */
+    /* If client was in a room, handle disconnection */
     if (client->assigned_room_id >= 0) {
         Room *room = find_room(rooms, client->assigned_room_id);
         if (room != NULL) {
-            /* Find and remove this client from the room's players */
+            /* If game is in progress, notify opponent and set cleanup deadline */
+            if (room->is_game_started) {
+                int other_player = 1 - client->assigned_player_id;
+                
+                printf("[SERVER] Player %d disconnected from active game in room %d\n", 
+                       client->assigned_player_id, room->room_id);
+                
+                /* Notify remaining player */
+                if (room->connected_players[other_player] != NULL) {
+                    send_error(room->connected_players[other_player]->socket_fd, 
+                              "Opponent disconnected! Game will end in 30 seconds if they don't reconnect.");
+                }
+                
+                /* Set cleanup deadline */
+                room->cleanup_deadline = time(NULL) + DISCONNECT_TIMEOUT;
+                
+                /* Remove this player from the room but keep room active */
+                room->connected_players[client->assigned_player_id] = NULL;
+                client->is_connected = 0;
+                client->socket_fd = -1;
+                return;
+            }
+            
+            /* Game not in progress - normal cleanup */
             for (int i = 0; i < ROOM_SIZE; i++) {
                 if (room->connected_players[i] == client) {
                     room->connected_players[i] = NULL;
