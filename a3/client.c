@@ -153,7 +153,12 @@ int client_join_room(Client *client) {
     /* Prompt for room ID */
     printf("Enter the room ID to join: ");
     int room_id;
-    if (scanf("%d", &room_id) != 1) {
+    int scan_result = scanf("%d", &room_id);
+    if (scan_result == EOF) {
+        fprintf(stderr, "Error: Unexpected end of input.\n");
+        return -1;
+    }
+    if (scan_result != 1) {
         fprintf(stderr, "Error: Invalid room ID input.\n");
         return -1;
     }
@@ -256,8 +261,15 @@ int client_place_ships(Client *client) {
             while (1) {
                 printf("Orientation (H=horizontal, V=vertical): ");
                 char orient_char;
-                scanf(" %c", &orient_char);
-                getchar();  /* Consume newline */
+                int scan_result = scanf(" %c", &orient_char);
+
+                /* Check for EOF or read error BEFORE consuming newline */
+                if (scan_result == EOF) {
+                    fprintf(stderr, "Error: Unexpected end of input during orientation prompt.\n");
+                    return -1;
+                }
+                
+                getchar();  /* Consume newline (only if scanf succeeded) */
 
                 if (orient_char == 'H' || orient_char == 'h') {
                     orientation = HORIZONTAL;
@@ -294,7 +306,7 @@ int client_place_ships(Client *client) {
                 printf("Ship placed successfully!\n");
                 break;
             } else {
-                printf("Invalid placement (out of bounds or overlaps). Try again.\n");
+                printf("Invalid placement. Check bounds, overlap, or adjacent ships. Try again.\n");
             }
         }
 
@@ -791,8 +803,21 @@ int main(int argc, char *argv[]) {
     printf("Enter your choice (1 or 2): ");
 
     int choice;
-    scanf("%d", &choice);
-    getchar();  /* Consume newline after input */
+    int scan_result = scanf("%d", &choice);
+    
+    /* Check for EOF or invalid input BEFORE consuming newline */
+    if (scan_result == EOF) {
+        fprintf(stderr, "Error: Unexpected end of input.\n");
+        client_disconnect(&client);
+        return 1;
+    }
+    if (scan_result != 1) {
+        fprintf(stderr, "Error: Invalid choice input.\n");
+        client_disconnect(&client);
+        return 1;
+    }
+    
+    getchar();  /* Consume newline after input (only if scanf succeeded) */
 
     if (choice == 1) {
         printf("\n--- Creating Room ---\n");
