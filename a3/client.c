@@ -453,6 +453,81 @@ int client_submit_board(Client *client) {
 }
 
 /*
+ * prompt_shot_or_view - Prompt player for shot coordinates or 'v' to view boards.
+ *
+ * This helper exists separately from get_player_input() because it adds view-board
+ * functionality on top of coordinate entry. The function:
+ * 1. Prompts player with option to enter coordinates or 'v' to view boards
+ * 2. If 'v'/'V' entered: displays own_board (with opponent's marks) and enemy_view,
+ *    then loops to prompt again for coordinates
+ * 3. If coordinates entered: validates bounds, checks for duplicate shots,
+ *    and returns only on a valid, fresh coordinate pair
+ *
+ * This keeps the main game loop clean by encapsulating all shot input logic here.
+ * The board-viewing feature helps players strategize without needing to memorize
+ * the board state displayed only once at turn start.
+ *
+ * Parameters:
+ *   client - pointer to the Client (needed for board access and shot_already_taken check)
+ *   x - pointer to store x coordinate (only set when valid coordinates entered)
+ *   y - pointer to store y coordinate (only set when valid coordinates entered)
+ *
+ * Returns:
+ *   0 on success (valid coordinates stored in x and y)
+ *   -1 on fatal error (EOF or read failure)
+ */
+static int prompt_shot_or_view(const Client *client, int *x, int *y) {
+    char input_line[256];
+
+    while (1) {
+        printf("Enter coordinates (x y, both 0-9) or 'v' to view boards: ");
+        fflush(stdout);
+
+        /* Use fgets to read entire line, allowing detection of special commands */
+        if (fgets(input_line, sizeof(input_line), stdin) == NULL) {
+            return -1;  /* EOF or read error */
+        }
+
+        /* Check if user typed 'v' or 'V' to view their boards */
+        if (input_line[0] == 'v' || input_line[0] == 'V') {
+            /* Display own board (shows what opponent has hit or missed) */
+            printf("\n--- Your Board (with opponent's shots) ---\n");
+            print_board(&client->own_board, 1);
+
+            /* Display enemy view (shows current knowledge of opponent's board) */
+            printf("--- Enemy Board (your shots so far) ---\n");
+            print_board(&client->enemy_view, 0);
+
+            /* Loop back to prompt again for actual coordinates */
+            printf("\n");
+            continue;
+        }
+
+        /* Try to parse coordinates from input line */
+        if (sscanf(input_line, "%d %d", x, y) != 2) {
+            printf("Invalid input. Please enter two integers or 'v' to view boards.\n");
+            continue;
+        }
+
+        /* Validate coordinates are in bounds [0, BOARD_SIZE-1] */
+        if (!in_bounds(*x, *y)) {
+            printf("Coordinates out of bounds. Please use 0-9.\n");
+            continue;
+        }
+
+        /* Check if this cell has already been targeted (shot prevention).
+         * Prevents wasted shots and gives immediate feedback. */
+        if (shot_already_taken(&client->enemy_view, *x, *y)) {
+            printf("You already fired at (%d, %d)! Choose a different cell.\n", *x, *y);
+            continue;
+        }
+
+        /* Valid, fresh shot coordinates - return success */
+        return 0;
+    }
+}
+
+/*
  * client_play_game - Main game loop for the client.
  *
  * Receives messages from the server and processes them:
@@ -496,29 +571,15 @@ int client_play_game(Client *client) {
                 printf("Current view of opponent's board:\n");
                 print_board(&client->enemy_view, 0);
 
-                /* Keep prompting until player selects a valid fresh cell (not already targeted) */
+                /* Use helper to get shot coordinates, with option to view boards */
                 int x, y;
-                while (1) {
-                    /* Prompt player for shot coordinates using helper function */
-                    if (get_player_input(&x, &y) < 0) {
-                        fprintf(stderr, "Error: Failed to read coordinates.\n");
-                        return -1;
-                    }
-
-                    /* Check if this cell has already been targeted locally.
-                     * Client-side validation prevents wasted server round-trips and gives
-                     * the player immediate feedback if they pick a cell they've already shot at.
-                     * This improves UX significantly. */
-                    if (shot_already_taken(&client->enemy_view, x, y)) {
-                        printf("You already fired at (%d, %d)! Choose a different cell.\n", x, y);
-                        continue;  /* Prompt again */
-                    }
-
-                    /* Valid shot: cell has not been targeted yet, break out of validation loop */
-                    break;
+                if (prompt_shot_or_view(client, &x, &y) < 0) {
+                    fprintf(stderr, "Error: Failed to read input.\n");
+                    return -1;
                 }
 
-                /* Create and send MSG_SHOOT message with validated coordinates */
+                /* At this point, x and y are guaranteed to be valid and fresh (not already shot) */
+                /* Create and send MSG_SHOOT message */
                 Message shoot_msg;
                 memset(&shoot_msg, 0, sizeof(Message));
                 shoot_msg.type = MSG_SHOOT;
