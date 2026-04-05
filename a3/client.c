@@ -619,6 +619,13 @@ int client_play_game(Client *client) {
             case MSG_SHOT_RESULT:
                 printf("\n--- Shot Result ---\n");
 
+                /* Validate incoming coordinates before updating board */
+                if (!in_bounds(msg.x, msg.y)) {
+                    fprintf(stderr, "Error: Invalid shot coordinates from server: (%d, %d)\n", msg.x, msg.y);
+                    client->state = CLIENT_ERROR;
+                    return -1;
+                }
+
                 /* Update enemy_view board to reflect the shot result */
                 switch (msg.shot_result) {
                     case SHOT_MISS:
@@ -645,6 +652,13 @@ int client_play_game(Client *client) {
             /* ===== OPPONENT SHOT AT US ===== */
             case MSG_INCOMING_SHOT:
                 printf("\n--- Opponent's Shot ---\n");
+
+                /* Validate incoming coordinates before updating board */
+                if (!in_bounds(msg.x, msg.y)) {
+                    fprintf(stderr, "Error: Invalid shot coordinates from server: (%d, %d)\n", msg.x, msg.y);
+                    client->state = CLIENT_ERROR;
+                    return -1;
+                }
 
                 /* Update own_board to reflect the opponent's shot result */
                 switch (msg.shot_result) {
