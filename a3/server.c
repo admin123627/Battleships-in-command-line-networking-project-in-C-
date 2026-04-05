@@ -908,27 +908,34 @@ void remove_client(Client clients[], Room rooms[], int client_index) {
     if (client->assigned_room_id >= 0) {
         Room *room = find_room(rooms, client->assigned_room_id);
         if (room != NULL) {
-            /* If game is in progress, notify opponent and set cleanup deadline */
+            /* If game is in progress, notify opponent and immediately end game */
             if (room->is_game_started) {
                 int other_player = 1 - client->assigned_player_id;
                 
-                printf("[SERVER] Player %d disconnected from active game in room %d\n", 
+                printf("[SERVER] Player %d disconnected from active game in room %d. Game ended.\n", 
                        client->assigned_player_id, room->room_id);
                 
-                /* Notify remaining player with MSG_OPPONENT_LEFT */
+                /* Notify remaining player that opponent disconnected and game is over */
                 if (room->connected_players[other_player] != NULL) {
                     Message disconnect_msg;
                     memset(&disconnect_msg, 0, sizeof(Message));
-                    disconnect_msg.type = MSG_OPPONENT_LEFT;
+                    disconnect_msg.type = MSG_OPPONENT_LEFT;  /* Reuse existing protocol message */
                     disconnect_msg.room_id = room->room_id;
                     send_message(room->connected_players[other_player]->socket_fd, &disconnect_msg);
                 }
                 
-                /* Set cleanup deadline */
-                room->cleanup_deadline = time(NULL) + DISCONNECT_TIMEOUT;
+                /* Immediately clean up: deactivate the room and remove both players */
+                for (int i = 0; i < ROOM_SIZE; i++) {
+                    if (room->connected_players[i] != NULL) {
+                        room->connected_players[i]->is_connected = 0;
+                        room->connected_players[i]->socket_fd = -1;
+                    }
+                    room->connected_players[i] = NULL;
+                }
+                room->is_active = 0;
+                room->is_game_started = 0;
                 
-                /* Remove this player from the room but keep room active */
-                room->connected_players[client->assigned_player_id] = NULL;
+                /* Mark this client as disconnected */
                 client->is_connected = 0;
                 client->socket_fd = -1;
                 return;
