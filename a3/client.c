@@ -370,12 +370,6 @@ int client_wait_for_opponent(Client *client) {
             printf("Time to set up your board!\n\n");
             client->state = CLIENT_BOARD_SETUP;
             return 0;
-        } else if (msg.type == MSG_GAME_START) {
-            /* Game already in progress (reconnection case) - skip board setup */
-            printf("You've rejoined an active game! Game resuming...\n\n");
-            printf("*** Game Started! ***\n");
-            client->state = CLIENT_IN_GAME;
-            return 0;
         } else {
             fprintf(stderr, 
                 "Error: Unexpected message type %d while waiting for opponent.\n",
@@ -867,21 +861,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "\nFailed while waiting for opponent.\n");
         client_disconnect(&client);
         return 1;
-    }
-
-    /* Check if this is a reconnection (game already in progress) */
-    if (client.state == CLIENT_IN_GAME) {
-        /* Skip ship placement and board submission - game is already running */
-        printf("\n[PHASE 6] Resuming game play...\n");
-        if (client_play_game(&client) < 0) {
-            fprintf(stderr, "\nGame play ended with an error.\n");
-            client_disconnect(&client);
-            return 1;
-        }
-        printf("\n[PHASE 7] Game complete. Disconnecting...\n");
-        client_disconnect(&client);
-        printf("Client disconnected.\n");
-        return 0;
     }
 
     /* ========== PHASE 4: PLACE SHIPS (BOARD SETUP PHASE) ========== */

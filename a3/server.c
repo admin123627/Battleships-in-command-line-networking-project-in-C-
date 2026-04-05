@@ -54,7 +54,6 @@ int main(void) {
         rooms[i].player_boards_submitted[1] = 0;
         rooms[i].connected_players[0] = NULL;
         rooms[i].connected_players[1] = NULL;
-        rooms[i].cleanup_deadline = -1;
     }
 
     printf("Server initialized. Waiting for clients...\n");
@@ -87,9 +86,6 @@ int main(void) {
  */
 void run_server(int listen_fd, Client clients[], Room rooms[]) {
     while (1) {
-        /* Check if any rooms need cleanup after disconnection */
-        check_disconnection_timeouts(clients, rooms);
-
         /* Set up fd_set for select() monitoring */
         fd_set readfds;
         FD_ZERO(&readfds);
@@ -272,69 +268,25 @@ void handle_client_message(Client clients[], Room rooms[], int client_index) {
                 break;
             }
 
-            /* For reconnection (game already started), send the appropriate messages
-             * AFTER MSG_JOIN_OK to maintain proper message ordering */
-            if (room->is_game_started) {
-                /* Reconnection case - send game state messages */
-                printf("[SERVER] Sending reconnection messages to player %d\n", player_id);
-                
-                /* Send MSG_GAME_START to reconnecting player */
-                Message game_start;
-                memset(&game_start, 0, sizeof(Message));
-                game_start.type = MSG_GAME_START;
-                game_start.room_id = msg.room_id;
-                game_start.player_id = player_id;
-                send_message(client->socket_fd, &game_start);
-                
-                /* Send current turn information */
-                Message turn_msg;
-                memset(&turn_msg, 0, sizeof(Message));
-                turn_msg.room_id = msg.room_id;
-                
-                if (room->game.current_turn == player_id) {
-                    /* It's the reconnecting player's turn */
-                    turn_msg.type = MSG_YOUR_TURN;
-                } else {
-                    /* It's the other player's turn */
-                    turn_msg.type = MSG_WAIT_TURN;
-                }
-                send_message(client->socket_fd, &turn_msg);
-                
-                /* Notify other player that opponent has reconnected */
-                int other_player = 1 - player_id;
-                if (room->connected_players[other_player] != NULL) {
-                    Message opponent_msg;
-                    memset(&opponent_msg, 0, sizeof(Message));
-                    
-                    if (room->game.current_turn == other_player) {
-                        opponent_msg.type = MSG_YOUR_TURN;
-                    } else {
-                        opponent_msg.type = MSG_WAIT_TURN;
-                    }
-                    opponent_msg.room_id = msg.room_id;
-                    send_message(room->connected_players[other_player]->socket_fd, &opponent_msg);
-                }
-            } else {
-                /* Normal join - send MSG_OPPONENT_JOINED */
-                Message waiting;
-                memset(&waiting, 0, sizeof(Message));
-                waiting.type = MSG_OPPONENT_JOINED;
-                waiting.room_id = msg.room_id;
-                waiting.player_id = player_id;
-                if (send_message(client->socket_fd, &waiting) < 0) {
-                    printf("Failed to send MSG_OPPONENT_JOINED to joining player\n");
-                }
+            /* Send MSG_OPPONENT_JOINED to both players */
+            Message waiting;
+            memset(&waiting, 0, sizeof(Message));
+            waiting.type = MSG_OPPONENT_JOINED;
+            waiting.room_id = msg.room_id;
+            waiting.player_id = player_id;
+            if (send_message(client->socket_fd, &waiting) < 0) {
+                printf("Failed to send MSG_OPPONENT_JOINED to joining player\n");
+            }
 
-                /* Notify the other player that opponent has joined */
-                if (room->connected_players[1 - player_id] != NULL) {
-                    Message opp_waiting;
-                    memset(&opp_waiting, 0, sizeof(Message));
-                    opp_waiting.type = MSG_OPPONENT_JOINED;
-                    opp_waiting.room_id = msg.room_id;
-                    opp_waiting.player_id = 1 - player_id;
-                    if (send_message(room->connected_players[1 - player_id]->socket_fd, &opp_waiting) < 0) {
-                        printf("Failed to send MSG_OPPONENT_JOINED to existing player\n");
-                    }
+            /* Notify the other player that opponent has joined */
+            if (room->connected_players[1 - player_id] != NULL) {
+                Message opp_waiting;
+                memset(&opp_waiting, 0, sizeof(Message));
+                opp_waiting.type = MSG_OPPONENT_JOINED;
+                opp_waiting.room_id = msg.room_id;
+                opp_waiting.player_id = 1 - player_id;
+                if (send_message(room->connected_players[1 - player_id]->socket_fd, &opp_waiting) < 0) {
+                    printf("Failed to send MSG_OPPONENT_JOINED to existing player\n");
                 }
             }
             break;
@@ -562,11 +514,10 @@ Room *find_room(Room rooms[], int room_id) {
 }
 
 /*
- * join_room - Add a client to a room or reconnect a disconnected player.
+ * join_room - Add a client to a room.
  *
- * Finds the specified room and adds the client to it. If a game is in progress
- * and a player slot is empty (player disconnected), allows reconnection to that slot.
- * Otherwise assigns player_id based on current_player_count (0 for first, 1 for second).
+ * Finds the specified room and adds the client to it.
+ * Assigns player_id based on current_player_count (0 for first, 1 for second).
  *
  * Parameters:
  *   rooms - array of Room structures
@@ -585,25 +536,7 @@ int join_room(Room rooms[], Client *client, int room_id) {
         return -1;
     }
 
-    /* If game is in progress, check for empty player slot (reconnection case) */
-    if (room->is_game_started) {
-        for (int i = 0; i < ROOM_SIZE; i++) {
-            if (room->connected_players[i] == NULL) {
-                /* Found empty slot - this is a reconnection */
-                room->connected_players[i] = client;
-                client->assigned_player_id = i;
-                client->assigned_room_id = room_id;
-                
-                /* Clear cleanup deadline since player reconnected */
-                room->cleanup_deadline = -1;
-                
-                printf("[SERVER] Player rejoined room %d at slot %d (game resumes)\n", room_id, i);
-                return i;
-            }
-        }
-    }
-
-    /* Normal join - both slots filled or game not started */
+    /* Both slots filled or game already in progress */
     if (room->current_player_count >= ROOM_SIZE) {
         printf("[SERVER] Room %d is full\n", room_id);
         return -1;
@@ -845,46 +778,6 @@ int send_error(int fd, const char *msg) {
     }
 
     return 0;
-}
-
-/*
- * check_disconnection_timeouts - Force cleanup of remaining player if timeout expires.
- *
- * When a player disconnects during an active game, sets a 30-second deadline.
- * If the deadline expires, disconnect the remaining player and deactivate the room.
- *
- * Parameters:
- *   clients - array of Client structures
- *   rooms - array of Room structures
- *
- * Returns:
- *   void
- */
-void check_disconnection_timeouts(Client clients[], Room rooms[]) {
-    time_t now = time(NULL);
-    
-    for (int i = 0; i < MAX_ROOMS; i++) {
-        if (rooms[i].is_active && rooms[i].cleanup_deadline > 0) {
-            if (now >= rooms[i].cleanup_deadline) {
-                printf("[SERVER] Disconnection timeout in room %d. Closing room.\n", rooms[i].room_id);
-                
-                /* Find and disconnect the remaining player */
-                for (int j = 0; j < MAX_CLIENTS; j++) {
-                    if (clients[j].is_connected && 
-                        clients[j].assigned_room_id == rooms[i].room_id) {
-                        printf("[SERVER] Disconnecting remaining player %d from room %d\n", j, rooms[i].room_id);
-                        send_error(clients[j].socket_fd, "Game ended - opponent did not reconnect within 30 seconds.");
-                        remove_client(clients, rooms, j);
-                        break;
-                    }
-                }
-                
-                /* Deactivate the room */
-                rooms[i].is_active = 0;
-                rooms[i].cleanup_deadline = -1;
-            }
-        }
-    }
 }
 
 /*

@@ -39,7 +39,7 @@ typedef enum {
 
     /* End / errors */
     MSG_GAME_OVER,       // Server -> Client
-    MSG_OPPONENT_LEFT,   // Server -> Client (opponent disconnected, waiting for reconnect)
+    MSG_OPPONENT_LEFT,   // Server -> Client (opponent disconnected, game ended immediately)
     MSG_ERROR,           // Server -> Client
     MSG_DISCONNECT       // Either direction
 } MessageType;
