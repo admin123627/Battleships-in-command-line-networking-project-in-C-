@@ -1,0 +1,9 @@
+# Build outputs
+client
+server
+test_game
+*.o
+
+# macOS debug and junk files
+.DS_Store
+*.dSYM/
