@@ -7,16 +7,8 @@
 #include "protocol.h"
 #include "game.h"
 
-/*
- * send_message - Send a message over socket with loop for partial sends.
- *
- * Sockets may not send all data in one call, so we loop until all bytes
- * are sent. This ensures the complete Message structure reaches the server.
- *
- * Returns:
- *   0 on success (all sizeof(Message) bytes sent)
- *   -1 on failure (send error or sent 0 bytes unexpectedly)
- */
+// Send a message to the server. Keeps looping until all bytes are sent
+// Returns 0 if OK, -1 if something goes wrong
 int send_message(int fd, Message *msg) {
     size_t total = sizeof(Message);
     size_t sent = 0;
@@ -38,17 +30,8 @@ int send_message(int fd, Message *msg) {
     return 0;
 }
 
-/*
- * receive_message - Receive a message from socket with loop for partial receives.
- *
- * Sockets may not deliver all data in one call, especially for larger structures.
- * We loop until we get all sizeof(Message) bytes. This ensures we have the
- * complete Message before returning.
- *
- * Returns:
- *   0 on success (all sizeof(Message) bytes received)
- *   -1 on failure (recv error, peer closed, or received 0 bytes unexpectedly)
- */
+// Receive a message from the server. Loops until we get all the bytes
+// Returns 0 if OK, -1 if the connection dies
 int receive_message(int fd, Message *msg) {
     size_t total = sizeof(Message);
     size_t received = 0;
@@ -70,16 +53,8 @@ int receive_message(int fd, Message *msg) {
     return 0;
 }
 
-/*
- * get_player_input - Read and validate shot coordinates from player.
- *
- * Repeatedly prompts for x (column 0-9) and y (row 0-9) until valid input
- * is received. Invalid input is re-prompted.
- *
- * Returns:
- *   0 on success (valid coordinates stored)
- *   -1 on EOF or read failure
- */
+// Asks player for coordinates. Keeps asking until they give valid numbers between 0-9
+// Returns 0 if OK, -1 if EOF
 int get_player_input(int *x, int *y) {
     int result;
 
@@ -108,17 +83,8 @@ int get_player_input(int *x, int *y) {
     }
 }
 
-/*
- * validate_ship_placement - Check if a ship placement is valid on the board.
- *
- * Converts the ShipPlacement into a Ship struct (copying all relevant fields)
- * and then uses the existing can_place_ship() function to validate.
- * Does not modify the board.
- *
- * Returns:
- *   1 if placement is valid
- *   0 if placement is invalid (out of bounds or overlaps)
- */
+// Check if a ship placement is OK. Converts ShipPlacement to Ship and validates it
+// Returns 1 if good to place, 0 if not
 int validate_ship_placement(Board *board, ShipPlacement placement) {
     // Convert ShipPlacement to Ship for validation
     Ship ship;
@@ -133,21 +99,7 @@ int validate_ship_placement(Board *board, ShipPlacement placement) {
     return can_place_ship(board, ship);
 }
 
-/*
- * print_board - Display the game board with current state of all cells.
- *
- * Prints a 10x10 grid with:
- *   '.' = empty cell
- *   'S' = ship (only if reveal_ships is 1)
- *   'X' = hit
- *   'O' = miss
- *
- * The opponent's board should be printed with reveal_ships=0 to hide ships.
- * Your own board should be printed with reveal_ships=1 to see your ship placements.
- *
- * Returns:
- *   void
- */
+// Print out the board with current state. X = hit, O = miss, S = ship (if revealed)
 void print_board(const Board *board, int reveal_ships) {
     // Print column headers
     printf("  ");
@@ -179,16 +131,8 @@ void print_board(const Board *board, int reveal_ships) {
     printf("\n");
 }
 
-/*
- * shot_already_taken - Check if a shot has already been fired at a cell.
- *
- * Looks up the cell state in enemy_view to determine if coordinates have
- * already been targeted. Used to validate client-side shot attempts.
- *
- * Returns:
- *   1 if cell is CELL_HIT or CELL_MISS (already targeted)
- *   0 if cell is CELL_EMPTY or out of bounds (valid shot)
- */
+// Check if we already took a shot at this spot (hit or miss)
+// Returns 1 if yes (can't shoot again), 0 if no (valid new shot)
 int shot_already_taken(const Board *enemy_view, int x, int y) {
     if (!in_bounds(x, y)) {
         return 0;  /* Out of bounds is already handled by get_player_input */

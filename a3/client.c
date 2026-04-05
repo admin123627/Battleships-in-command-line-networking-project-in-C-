@@ -54,19 +54,7 @@ int client_connect_to_server(Client *client, int port, const char *hostname) {
     return 0;
 }
 
-/*
- * client_create_room - Send a create room request to the server.
- *
- * Flow:
- * 1. Prompt player for a name
- * 2. Send MSG_CREATE_ROOM with player name
- * 3. Receive MSG_ROOM_CREATED from server (contains room_id and player_id)
- * 4. Store room info and update state to CLIENT_WAITING_FOR_OPPONENT
- *
- * Returns:
- *   0 on success
- *   -1 on failure (send/recv error, wrong response type, etc.)
- */
+// Create a new room on the server and get assigned a room ID
 int client_create_room(Client *client) {
     if (client->state != CLIENT_CONNECTED) {
         fprintf(stderr, "Error: Must be connected before creating a room.\n");
@@ -121,19 +109,7 @@ int client_create_room(Client *client) {
     return 0;
 }
 
-/*
- * client_join_room - Send a join room request to the server.
- *
- * Flow:
- * 1. Prompt player for name and room ID to join
- * 2. Send MSG_JOIN_ROOM with player name and room_id
- * 3. Receive MSG_JOIN_OK from server (contains room_id and player_id)
- * 4. Store room info and update state to CLIENT_WAITING_FOR_OPPONENT
- *
- * Returns:
- *   0 on success
- *   -1 on failure (send/recv error, wrong response type, room not found, etc.)
- */
+// Join an existing room by room ID
 int client_join_room(Client *client) {
     if (client->state != CLIENT_CONNECTED) {
         fprintf(stderr, "Error: Must be connected before joining a room.\n");
@@ -211,23 +187,7 @@ int client_join_room(Client *client) {
     return 0;
 }
 
-/*
- * client_place_ships - Interactively place ships on the client's board.
- *
- * Flow:
- * 1. For each of the MAX_SHIPS ships:
- *    - Display ship name and length
- *    - Prompt for starting x/y coordinates (0-9)
- *    - Prompt for orientation (H for horizontal, V for vertical)
- *    - Validate placement using validate_ship_placement()
- *    - Place ship on own_board using place_ship()
- *    - Display updated board
- * 2. Set client state to CLIENT_BOARD_SETUP after all ships are placed
- *
- * Returns:
- *   0 on success (all ships placed)
- *   -1 on input error (EOF, etc.)
- */
+// Let the player place all 5 ships where they want on the board
 int client_place_ships(Client *client) {
     printf("\n====== Board Setup ======\n");
     printf("You must place %d ships on your 10x10 board.\n\n", MAX_SHIPS);
@@ -319,29 +279,7 @@ int client_place_ships(Client *client) {
     return 0;
 }
 
-/*
- * client_wait_for_opponent - Wait for the opponent to join the room.
- *
- * After creating or joining a room, this function waits for the server to confirm
- * that the opponent is now connected. This means both players are in the room and
- * can now begin board setup (placing ships).
- *
- * Flow:
- * 1. Display waiting message to user
- * 2. Loop waiting for messages from server:
- *    - If MSG_WAITING: Opponent not yet joined, continue waiting
- *    - If MSG_OPPONENT_JOINED: Both players are now in room, ready for board setup
- * 3. Update client state to CLIENT_BOARD_SETUP when opponent joins
- *
- * Protocol note:
- * - MSG_OPPONENT_JOINED signals that the room is full (both players connected)
- * - This is different from MSG_GAME_START, which comes later after both boards
- *   are submitted and validated.
- *
- * Returns:
- *   0 on success (opponent joined, both players in room)
- *   -1 on failure (connection lost, invalid message, etc.)
- */
+// Wait in the room until the other player joins (blocking)
 int client_wait_for_opponent(Client *client) {
     if (client->state != CLIENT_WAITING_FOR_OPPONENT) {
         fprintf(stderr, "Error: Client must be in WAITING_FOR_OPPONENT state.\n");
@@ -380,20 +318,7 @@ int client_wait_for_opponent(Client *client) {
     }
 }
 
-/*
- * client_submit_board - Send the client's board to the server.
- *
- * Flow:
- * 1. Create MSG_SUBMIT_BOARD with all ship placements from own_board
- * 2. Send message to server
- * 3. Receive MSG_BOARD_OK or MSG_BOARD_INVALID response
- * 4. If accepted, wait for MSG_GAME_START
- * 5. Update state to CLIENT_IN_GAME
- *
- * Returns:
- *   0 on success (board accepted and game started)
- *   -1 on failure (board rejected, message error, etc.)
- */
+// Send our board to the server and wait for approval
 int client_submit_board(Client *client) {
     if (client->state != CLIENT_BOARD_SETUP) {
         fprintf(stderr, "Error: Board must be set up before submission.\n");
@@ -539,21 +464,7 @@ static int prompt_shot_or_view(const Client *client, int *x, int *y) {
     }
 }
 
-/*
- * client_play_game - Main game loop for the client.
- *
- * Receives messages from the server and processes them:
- * - MSG_YOUR_TURN: Prompt player for shot coordinates and send MSG_SHOOT
- * - MSG_SHOT_RESULT: Update enemy_view and display the result (hit/miss/sunk)
- * - MSG_INCOMING_SHOT: Update own_board and display what opponent hit
- * - MSG_WAIT_TURN: Display waiting message and continue
- * - MSG_GAME_OVER: Determine and display the winner, exit loop
- * - MSG_ERROR: Display error message and return -1
- *
- * Returns:
- *   0 on normal game end
- *   -1 on error (connection lost, unexpected message, etc.)
- */
+// Main game loop - take turns shooting until someone wins
 int client_play_game(Client *client) {
     if (client->state != CLIENT_IN_GAME) {
         fprintf(stderr, "Error: Game must be in progress.\n");
@@ -721,13 +632,7 @@ int client_play_game(Client *client) {
     return 0;
 }
 
-/*
- * client_disconnect - Close the connection and clean up the client.
- *
- * 1. Send MSG_DISCONNECT to the server (optional, connection close signals it)
- * 2. Close the socket
- * 3. Reset client state and IDs
- */
+// Close connection and clean up when done
 void client_disconnect(Client *client) {
     if (client->fd >= 0) {
         /* Send disconnect message to server */
