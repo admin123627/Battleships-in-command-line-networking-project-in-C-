@@ -272,10 +272,50 @@ void handle_client_message(Client clients[], Room rooms[], int client_index) {
                 break;
             }
 
-            /* For reconnection (game already started), join_room() already sent
-             * MSG_GAME_START and turn messages directly. Skip MSG_OPPONENT_JOINED. */
-            if (!room->is_game_started) {
-                /* Normal join: send MSG_OPPONENT_JOINED to the new joiner */
+            /* For reconnection (game already started), send the appropriate messages
+             * AFTER MSG_JOIN_OK to maintain proper message ordering */
+            if (room->is_game_started) {
+                /* Reconnection case - send game state messages */
+                printf("[SERVER] Sending reconnection messages to player %d\n", player_id);
+                
+                /* Send MSG_GAME_START to reconnecting player */
+                Message game_start;
+                memset(&game_start, 0, sizeof(Message));
+                game_start.type = MSG_GAME_START;
+                game_start.room_id = msg.room_id;
+                game_start.player_id = player_id;
+                send_message(client->socket_fd, &game_start);
+                
+                /* Send current turn information */
+                Message turn_msg;
+                memset(&turn_msg, 0, sizeof(Message));
+                turn_msg.room_id = msg.room_id;
+                
+                if (room->game.current_turn == player_id) {
+                    /* It's the reconnecting player's turn */
+                    turn_msg.type = MSG_YOUR_TURN;
+                } else {
+                    /* It's the other player's turn */
+                    turn_msg.type = MSG_WAIT_TURN;
+                }
+                send_message(client->socket_fd, &turn_msg);
+                
+                /* Notify other player that opponent has reconnected */
+                int other_player = 1 - player_id;
+                if (room->connected_players[other_player] != NULL) {
+                    Message opponent_msg;
+                    memset(&opponent_msg, 0, sizeof(Message));
+                    
+                    if (room->game.current_turn == other_player) {
+                        opponent_msg.type = MSG_YOUR_TURN;
+                    } else {
+                        opponent_msg.type = MSG_WAIT_TURN;
+                    }
+                    opponent_msg.room_id = msg.room_id;
+                    send_message(room->connected_players[other_player]->socket_fd, &opponent_msg);
+                }
+            } else {
+                /* Normal join - send MSG_OPPONENT_JOINED */
                 Message waiting;
                 memset(&waiting, 0, sizeof(Message));
                 waiting.type = MSG_OPPONENT_JOINED;
@@ -558,46 +598,6 @@ int join_room(Room rooms[], Client *client, int room_id) {
                 room->cleanup_deadline = -1;
                 
                 printf("[SERVER] Player rejoined room %d at slot %d (game resumes)\n", room_id, i);
-                
-                /* Tell reconnecting player the game is already started - no board submission needed */
-                Message game_start;
-                memset(&game_start, 0, sizeof(Message));
-                game_start.type = MSG_GAME_START;
-                game_start.room_id = room_id;
-                game_start.player_id = i;
-                send_message(client->socket_fd, &game_start);
-                
-                /* Send turn information to reconnecting player */
-                Message turn_msg;
-                memset(&turn_msg, 0, sizeof(Message));
-                turn_msg.room_id = room_id;
-                
-                if (room->game.current_turn == i) {
-                    /* It's the reconnecting player's turn */
-                    turn_msg.type = MSG_YOUR_TURN;
-                } else {
-                    /* It's the other player's turn */
-                    turn_msg.type = MSG_WAIT_TURN;
-                }
-                send_message(client->socket_fd, &turn_msg);
-                
-                /* Notify other player that opponent has reconnected */
-                int other_player = 1 - i;
-                if (room->connected_players[other_player] != NULL) {
-                    Message opponent_msg;
-                    memset(&opponent_msg, 0, sizeof(Message));
-                    
-                    if (room->game.current_turn == other_player) {
-                        /* Still the other player's turn */
-                        opponent_msg.type = MSG_YOUR_TURN;
-                    } else {
-                        /* Now it's the reconnecting player's turn, so other player waits */
-                        opponent_msg.type = MSG_WAIT_TURN;
-                    }
-                    opponent_msg.room_id = room_id;
-                    send_message(room->connected_players[other_player]->socket_fd, &opponent_msg);
-                }
-                
                 return i;
             }
         }
