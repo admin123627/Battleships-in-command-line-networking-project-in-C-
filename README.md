@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project is a command-line multiplayer Battleship game written in C for the CSC209 Systems Programming Mini-Project. The project follows the **client-server socket application** category, where one server process manages multiple connected clients using TCP sockets. The server is responsible for maintaining the authoritative game state, assigning players to rooms, validating moves, and coordinating gameplay between two players.
+This project is a command-line multiplayer Battleship game written in C for the CSC209 Systems Programming Mini-Project. This project was done in a group of 2, just me and my partner. The project follows the **client-server socket application** category, where one server process manages multiple connected clients using TCP sockets. The server is responsible for maintaining the authoritative game state, assigning players to rooms, validating moves, and coordinating gameplay between two players.
 
 The project was designed to demonstrate systems programming concepts such as socket programming, file descriptors, structured message passing, and concurrent client handling using a server event loop. 
 
